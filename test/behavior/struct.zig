@@ -1165,7 +1165,6 @@ test "anon init through error unions and optionals" {
     if (builtin.zig_backend == .stage2_arm) return error.SkipZigTest; // TODO
     if (builtin.zig_backend == .stage2_sparc64) return error.SkipZigTest; // TODO
     if (builtin.zig_backend == .stage2_spirv64) return error.SkipZigTest;
-    if (builtin.zig_backend == .stage2_riscv64) return error.SkipZigTest;
 
     const S = struct {
         a: u32,
@@ -1193,7 +1192,6 @@ test "anon init through optional" {
     if (builtin.zig_backend == .stage2_arm) return error.SkipZigTest; // TODO
     if (builtin.zig_backend == .stage2_sparc64) return error.SkipZigTest; // TODO
     if (builtin.zig_backend == .stage2_spirv64) return error.SkipZigTest;
-    if (builtin.zig_backend == .stage2_riscv64) return error.SkipZigTest;
 
     const S = struct {
         a: u32,
@@ -1503,7 +1501,6 @@ test "no dependency loop on pointer to optional struct" {
     if (builtin.zig_backend == .stage2_aarch64) return error.SkipZigTest;
     if (builtin.zig_backend == .stage2_arm) return error.SkipZigTest; // TODO
     if (builtin.zig_backend == .stage2_spirv64) return error.SkipZigTest;
-    if (builtin.zig_backend == .stage2_riscv64) return error.SkipZigTest;
 
     const S = struct {
         const A = struct { b: B };
@@ -2161,4 +2158,28 @@ test "matching captures causes struct equivalence" {
     const b: S.UnsignedWrapper(i8) = .{ .x = 10 };
     comptime assert(@TypeOf(a) == @TypeOf(b));
     try expect(a.x == b.x);
+}
+
+test "struct @FieldType" {
+    const S = struct {
+        a: u32,
+        b: f64,
+        c: *@This(),
+    };
+
+    comptime assert(@FieldType(S, "a") == u32);
+    comptime assert(@FieldType(S, "b") == f64);
+    comptime assert(@FieldType(S, "c") == *S);
+}
+
+test "extern struct @FieldType" {
+    const S = extern struct {
+        a: u32,
+        b: f64,
+        c: *@This(),
+    };
+
+    comptime assert(@FieldType(S, "a") == u32);
+    comptime assert(@FieldType(S, "b") == f64);
+    comptime assert(@FieldType(S, "c") == *S);
 }

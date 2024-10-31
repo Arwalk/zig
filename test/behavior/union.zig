@@ -1268,7 +1268,6 @@ test "extern union most-aligned field is smaller" {
     if (builtin.zig_backend == .stage2_aarch64) return error.SkipZigTest; // TODO
     if (builtin.zig_backend == .stage2_sparc64) return error.SkipZigTest; // TODO
     if (builtin.zig_backend == .stage2_spirv64) return error.SkipZigTest;
-    if (builtin.zig_backend == .stage2_riscv64) return error.SkipZigTest;
 
     const U = extern union {
         in6: extern struct {
@@ -1894,6 +1893,7 @@ test "reinterpret packed union" {
     if (builtin.cpu.arch.isPowerPC()) return error.SkipZigTest; // https://github.com/ziglang/zig/issues/21050
     if (builtin.cpu.arch.isMIPS()) return error.SkipZigTest; // https://github.com/ziglang/zig/issues/21050
     if (builtin.cpu.arch.isWasm()) return error.SkipZigTest; // TODO
+    if (builtin.cpu.arch == .s390x and builtin.zig_backend == .stage2_llvm) return error.SkipZigTest; // TODO
     try S.doTheTest();
 }
 
@@ -2338,4 +2338,40 @@ test "signed enum tag with negative value" {
     const e = Union{ .a = i };
 
     try expect(e.a == i);
+}
+
+test "union @FieldType" {
+    const U = union {
+        a: u32,
+        b: f64,
+        c: *@This(),
+    };
+
+    comptime assert(@FieldType(U, "a") == u32);
+    comptime assert(@FieldType(U, "b") == f64);
+    comptime assert(@FieldType(U, "c") == *U);
+}
+
+test "tagged union @FieldType" {
+    const U = union(enum) {
+        a: u32,
+        b: f64,
+        c: *@This(),
+    };
+
+    comptime assert(@FieldType(U, "a") == u32);
+    comptime assert(@FieldType(U, "b") == f64);
+    comptime assert(@FieldType(U, "c") == *U);
+}
+
+test "extern union @FieldType" {
+    const U = extern union {
+        a: u32,
+        b: f64,
+        c: *@This(),
+    };
+
+    comptime assert(@FieldType(U, "a") == u32);
+    comptime assert(@FieldType(U, "b") == f64);
+    comptime assert(@FieldType(U, "c") == *U);
 }

@@ -304,14 +304,14 @@ pub const Function = struct {
     air: Air,
     liveness: Liveness,
     value_map: CValueMap,
-    blocks: std.AutoHashMapUnmanaged(Air.Inst.Index, BlockData) = .{},
+    blocks: std.AutoHashMapUnmanaged(Air.Inst.Index, BlockData) = .empty,
     next_arg_index: usize = 0,
     next_block_index: usize = 0,
     object: Object,
     lazy_fns: LazyFnMap,
     func_index: InternPool.Index,
     /// All the locals, to be emitted at the top of the function.
-    locals: std.ArrayListUnmanaged(Local) = .{},
+    locals: std.ArrayListUnmanaged(Local) = .empty,
     /// Which locals are available for reuse, based on Type.
     free_locals_map: LocalsMap = .{},
     /// Locals which will not be freed by Liveness. This is used after a
@@ -320,10 +320,10 @@ pub const Function = struct {
     /// of variable declarations at the top of a function, sorted descending
     /// by type alignment.
     /// The value is whether the alloc needs to be emitted in the header.
-    allocs: std.AutoArrayHashMapUnmanaged(LocalIndex, bool) = .{},
+    allocs: std.AutoArrayHashMapUnmanaged(LocalIndex, bool) = .empty,
     /// Maps from `loop_switch_br` instructions to the allocated local used
     /// for the switch cond. Dispatches should set this local to the new cond.
-    loop_switch_conds: std.AutoHashMapUnmanaged(Air.Inst.Index, LocalIndex) = .{},
+    loop_switch_conds: std.AutoHashMapUnmanaged(Air.Inst.Index, LocalIndex) = .empty,
 
     fn resolveInst(f: *Function, ref: Air.Inst.Ref) !CValue {
         const gop = try f.value_map.getOrPut(ref);
@@ -1783,7 +1783,7 @@ pub const DeclGen = struct {
         const fn_ctype = try dg.ctypeFromType(fn_ty, kind);
 
         const fn_info = zcu.typeToFunc(fn_ty).?;
-        if (fn_info.cc == .Naked) {
+        if (fn_info.cc == .naked) {
             switch (kind) {
                 .forward => try w.writeAll("zig_naked_decl "),
                 .complete => try w.writeAll("zig_naked "),
@@ -1796,7 +1796,7 @@ pub const DeclGen = struct {
 
         var trailing = try renderTypePrefix(dg.pass, &dg.ctype_pool, zcu, w, fn_ctype, .suffix, .{});
 
-        if (toCallingConvention(fn_info.cc)) |call_conv| {
+        if (toCallingConvention(fn_info.cc, zcu)) |call_conv| {
             try w.print("{}zig_callconv({s})", .{ trailing, call_conv });
             trailing = .maybe_space;
         }
@@ -3144,7 +3144,6 @@ fn genBodyInner(f: *Function, body: []const Air.Inst.Index) error{ AnalysisFail,
             .breakpoint => try airBreakpoint(f.object.writer()),
             .ret_addr   => try airRetAddr(f, inst),
             .frame_addr => try airFrameAddress(f, inst),
-            .fence      => try airFence(f, inst),
 
             .ptr_add => try airPtrAddSub(f, inst, '+'),
             .ptr_sub => try airPtrAddSub(f, inst, '-'),
@@ -4986,17 +4985,6 @@ fn airFrameAddress(f: *Function, inst: Air.Inst.Index) !CValue {
     try f.renderType(writer, Type.usize);
     try writer.writeAll(")zig_frame_address();\n");
     return local;
-}
-
-fn airFence(f: *Function, inst: Air.Inst.Index) !CValue {
-    const atomic_order = f.air.instructions.items(.data)[@intFromEnum(inst)].fence;
-    const writer = f.object.writer();
-
-    try writer.writeAll("zig_fence(");
-    try writeMemoryOrder(writer, atomic_order);
-    try writer.writeAll(");\n");
-
-    return .none;
 }
 
 fn airUnreach(f: *Function) !void {
@@ -7616,12 +7604,39 @@ fn writeMemoryOrder(w: anytype, order: std.builtin.AtomicOrder) !void {
     return w.writeAll(toMemoryOrder(order));
 }
 
-fn toCallingConvention(call_conv: std.builtin.CallingConvention) ?[]const u8 {
-    return switch (call_conv) {
-        .Stdcall => "stdcall",
-        .Fastcall => "fastcall",
-        .Vectorcall => "vectorcall",
-        else => null,
+fn toCallingConvention(cc: std.builtin.CallingConvention, zcu: *Zcu) ?[]const u8 {
+    if (zcu.getTarget().cCallingConvention()) |ccc| {
+        if (cc.eql(ccc)) {
+            return null;
+        }
+    }
+    return switch (cc) {
+        .auto, .naked => null,
+
+        .x86_64_sysv, .x86_sysv => "sysv_abi",
+        .x86_64_win, .x86_win => "ms_abi",
+        .x86_stdcall => "stdcall",
+        .x86_fastcall => "fastcall",
+        .x86_thiscall => "thiscall",
+
+        .x86_vectorcall,
+        .x86_64_vectorcall,
+        => "vectorcall",
+
+        .x86_64_regcall_v3_sysv,
+        .x86_64_regcall_v4_win,
+        .x86_regcall_v3,
+        .x86_regcall_v4_win,
+        => "regcall",
+
+        .aarch64_vfabi => "aarch64_vector_pcs",
+        .aarch64_vfabi_sve => "aarch64_sve_pcs",
+        .arm_aapcs => "pcs(\"aapcs\")",
+        .arm_aapcs_vfp => "pcs(\"aapcs-vfp\")",
+        .riscv64_lp64_v, .riscv32_ilp32_v => "riscv_vector_cc",
+        .m68k_rtd => "m68k_rtd",
+
+        else => unreachable, // `Zcu.callconvSupported`
     };
 }
 

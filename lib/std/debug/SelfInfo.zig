@@ -184,10 +184,12 @@ fn lookupModuleDyld(self: *SelfInfo, address: usize) !*Module {
                     }
 
                     for (cmd.getSections()) |sect| {
+                        const sect_addr: usize = @intCast(sect.addr);
+                        const sect_size: usize = @intCast(sect.size);
                         if (mem.eql(u8, "__unwind_info", sect.sectName())) {
-                            unwind_info = @as([*]const u8, @ptrFromInt(sect.addr + vmaddr_slide))[0..sect.size];
+                            unwind_info = @as([*]const u8, @ptrFromInt(sect_addr + vmaddr_slide))[0..sect_size];
                         } else if (mem.eql(u8, "__eh_frame", sect.sectName())) {
-                            eh_frame = @as([*]const u8, @ptrFromInt(sect.addr + vmaddr_slide))[0..sect.size];
+                            eh_frame = @as([*]const u8, @ptrFromInt(sect_addr + vmaddr_slide))[0..sect_size];
                         }
                     }
 
@@ -590,7 +592,7 @@ pub const Module = switch (native_os) {
                 const section_bytes = try Dwarf.chopSlice(mapped_mem, sect.offset, sect.size);
                 sections[section_index.?] = .{
                     .data = section_bytes,
-                    .virtual_address = sect.addr,
+                    .virtual_address = @intCast(sect.addr),
                     .owned = false,
                 };
             }
@@ -1624,12 +1626,12 @@ pub fn unwindFrameDwarf(
     } else {
         const index = std.sort.binarySearch(Dwarf.FrameDescriptionEntry, di.fde_list.items, context.pc, struct {
             pub fn compareFn(pc: usize, item: Dwarf.FrameDescriptionEntry) std.math.Order {
-                if (pc < item.pc_begin) return .gt;
+                if (pc < item.pc_begin) return .lt;
 
                 const range_end = item.pc_begin + item.pc_range;
                 if (pc < range_end) return .eq;
 
-                return .lt;
+                return .gt;
             }
         }.compareFn);
 
@@ -1933,8 +1935,8 @@ pub const VirtualMachine = struct {
         len: u8 = 0,
     };
 
-    columns: std.ArrayListUnmanaged(Column) = .{},
-    stack: std.ArrayListUnmanaged(ColumnRange) = .{},
+    columns: std.ArrayListUnmanaged(Column) = .empty,
+    stack: std.ArrayListUnmanaged(ColumnRange) = .empty,
     current_row: Row = .{},
 
     /// The result of executing the CIE's initial_instructions

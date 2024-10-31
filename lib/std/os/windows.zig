@@ -599,6 +599,8 @@ pub const ReadFileError = error{
     /// The specified network name is no longer available.
     ConnectionResetByPeer,
     OperationAborted,
+    /// Unable to read file due to lock.
+    LockViolation,
     Unexpected,
 };
 
@@ -630,6 +632,7 @@ pub fn ReadFile(in_hFile: HANDLE, buffer: []u8, offset: ?u64) ReadFileError!usiz
                 .BROKEN_PIPE => return 0,
                 .HANDLE_EOF => return 0,
                 .NETNAME_DELETED => return error.ConnectionResetByPeer,
+                .LOCK_VIOLATION => return error.LockViolation,
                 else => |err| return unexpectedError(err),
             }
         }
@@ -679,7 +682,7 @@ pub fn WriteFile(
             .OPERATION_ABORTED => return error.OperationAborted,
             .NOT_ENOUGH_QUOTA => return error.SystemResources,
             .IO_PENDING => unreachable,
-            .BROKEN_PIPE => return error.BrokenPipe,
+            .NO_DATA => return error.BrokenPipe,
             .INVALID_HANDLE => return error.NotOpenForWriting,
             .LOCK_VIOLATION => return error.LockViolation,
             .NETNAME_DELETED => return error.ConnectionResetByPeer,
@@ -2821,10 +2824,7 @@ pub const STD_OUTPUT_HANDLE = maxInt(DWORD) - 11 + 1;
 /// The standard error device. Initially, this is the active console screen buffer, CONOUT$.
 pub const STD_ERROR_HANDLE = maxInt(DWORD) - 12 + 1;
 
-pub const WINAPI: std.builtin.CallingConvention = if (native_arch == .x86)
-    .Stdcall
-else
-    .C;
+pub const WINAPI: std.builtin.CallingConvention = .winapi;
 
 pub const BOOL = c_int;
 pub const BOOLEAN = BYTE;

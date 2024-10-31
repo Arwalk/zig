@@ -2052,6 +2052,7 @@ pub const CallConv = enum(u10) {
     x86_intrcc,
     avr_intrcc,
     avr_signalcc,
+    avr_builtincc,
 
     amdgpu_vs = 87,
     amdgpu_gs,
@@ -2060,6 +2061,7 @@ pub const CallConv = enum(u10) {
     amdgpu_kernel,
     x86_regcallcc,
     amdgpu_hs,
+    msp430_builtincc,
 
     amdgpu_ls = 95,
     amdgpu_es,
@@ -2068,8 +2070,14 @@ pub const CallConv = enum(u10) {
 
     amdgpu_gfx = 100,
 
+    m68k_intrcc,
+
     aarch64_sme_preservemost_from_x0 = 102,
     aarch64_sme_preservemost_from_x2,
+
+    m68k_rtdcc = 106,
+
+    riscv_vectorcallcc = 110,
 
     _,
 
@@ -2115,6 +2123,7 @@ pub const CallConv = enum(u10) {
             .x86_intrcc,
             .avr_intrcc,
             .avr_signalcc,
+            .avr_builtincc,
             .amdgpu_vs,
             .amdgpu_gs,
             .amdgpu_ps,
@@ -2122,13 +2131,17 @@ pub const CallConv = enum(u10) {
             .amdgpu_kernel,
             .x86_regcallcc,
             .amdgpu_hs,
+            .msp430_builtincc,
             .amdgpu_ls,
             .amdgpu_es,
             .aarch64_vector_pcs,
             .aarch64_sve_vector_pcs,
             .amdgpu_gfx,
+            .m68k_intrcc,
             .aarch64_sme_preservemost_from_x0,
             .aarch64_sme_preservemost_from_x2,
+            .m68k_rtdcc,
+            .riscv_vectorcallcc,
             => try writer.print(" {s}", .{@tagName(self)}),
             _ => try writer.print(" cc{d}", .{@intFromEnum(self)}),
         }
@@ -2526,6 +2539,10 @@ pub const Variable = struct {
 
         pub fn setLinkage(self: Index, linkage: Linkage, builder: *Builder) void {
             return self.ptrConst(builder).global.setLinkage(linkage, builder);
+        }
+
+        pub fn setDllStorageClass(self: Index, class: DllStorageClass, builder: *Builder) void {
+            return self.ptrConst(builder).global.setDllStorageClass(class, builder);
         }
 
         pub fn setUnnamedAddr(self: Index, unnamed_addr: UnnamedAddr, builder: *Builder) void {
@@ -3994,7 +4011,7 @@ pub const Function = struct {
     names: [*]const String = &[0]String{},
     value_indices: [*]const u32 = &[0]u32{},
     strip: bool,
-    debug_locations: std.AutoHashMapUnmanaged(Instruction.Index, DebugLocation) = .{},
+    debug_locations: std.AutoHashMapUnmanaged(Instruction.Index, DebugLocation) = .empty,
     debug_values: []const Instruction.Index = &.{},
     extra: []const u32 = &.{},
 
@@ -6166,7 +6183,7 @@ pub const WipFunction = struct {
         const value_indices = try gpa.alloc(u32, final_instructions_len);
         errdefer gpa.free(value_indices);
 
-        var debug_locations: std.AutoHashMapUnmanaged(Instruction.Index, DebugLocation) = .{};
+        var debug_locations: std.AutoHashMapUnmanaged(Instruction.Index, DebugLocation) = .empty;
         errdefer debug_locations.deinit(gpa);
         try debug_locations.ensureUnusedCapacity(gpa, @intCast(self.debug_locations.count()));
 
@@ -9557,7 +9574,7 @@ pub fn printUnbuffered(
         }
     }
 
-    var attribute_groups: std.AutoArrayHashMapUnmanaged(Attributes, void) = .{};
+    var attribute_groups: std.AutoArrayHashMapUnmanaged(Attributes, void) = .empty;
     defer attribute_groups.deinit(self.gpa);
 
     for (0.., self.functions.items) |function_i, function| {
@@ -13133,7 +13150,7 @@ pub fn toBitcode(self: *Builder, allocator: Allocator) bitcode_writer.Error![]co
     // Write LLVM IR magic
     try bitcode.writeBits(ir.MAGIC, 32);
 
-    var record: std.ArrayListUnmanaged(u64) = .{};
+    var record: std.ArrayListUnmanaged(u64) = .empty;
     defer record.deinit(self.gpa);
 
     // IDENTIFICATION_BLOCK
@@ -13524,7 +13541,7 @@ pub fn toBitcode(self: *Builder, allocator: Allocator) bitcode_writer.Error![]co
             try paramattr_block.end();
         }
 
-        var globals: std.AutoArrayHashMapUnmanaged(Global.Index, void) = .{};
+        var globals: std.AutoArrayHashMapUnmanaged(Global.Index, void) = .empty;
         defer globals.deinit(self.gpa);
         try globals.ensureUnusedCapacity(
             self.gpa,
@@ -13587,7 +13604,7 @@ pub fn toBitcode(self: *Builder, allocator: Allocator) bitcode_writer.Error![]co
 
         // Globals
         {
-            var section_map: std.AutoArrayHashMapUnmanaged(String, void) = .{};
+            var section_map: std.AutoArrayHashMapUnmanaged(String, void) = .empty;
             defer section_map.deinit(self.gpa);
             try section_map.ensureUnusedCapacity(self.gpa, globals.count());
 

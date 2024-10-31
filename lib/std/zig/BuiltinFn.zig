@@ -48,9 +48,9 @@ pub const Tag = enum {
     error_cast,
     @"export",
     @"extern",
-    fence,
     field,
     field_parent_ptr,
+    FieldType,
     float_cast,
     int_from_float,
     frame,
@@ -82,7 +82,6 @@ pub const Tag = enum {
     rem,
     return_address,
     select,
-    set_align_stack,
     set_eval_branch_quota,
     set_float_mode,
     set_runtime_safety,
@@ -125,17 +124,6 @@ pub const Tag = enum {
     work_group_id,
 };
 
-pub const MemLocRequirement = enum {
-    /// The builtin never needs a memory location.
-    never,
-    /// The builtin always needs a memory location.
-    always,
-    /// The builtin forwards the question to argument at index 0.
-    forward0,
-    /// The builtin forwards the question to argument at index 1.
-    forward1,
-};
-
 pub const EvalToError = enum {
     /// The builtin cannot possibly evaluate to an error.
     never,
@@ -147,8 +135,6 @@ pub const EvalToError = enum {
 
 tag: Tag,
 
-/// Info about the builtin call's ability to take advantage of a result location pointer.
-needs_mem_loc: MemLocRequirement = .never,
 /// Info about the builtin call's possibility of returning an error.
 eval_to_error: EvalToError = .never,
 /// `true` if the builtin call can be the left-hand side of an expression (assigned to).
@@ -194,7 +180,6 @@ pub const list = list: {
             "@as",
             .{
                 .tag = .as,
-                .needs_mem_loc = .forward1,
                 .eval_to_error = .maybe,
                 .param_count = 2,
             },
@@ -231,7 +216,6 @@ pub const list = list: {
             "@bitCast",
             .{
                 .tag = .bit_cast,
-                .needs_mem_loc = .forward0,
                 .param_count = 1,
             },
         },
@@ -312,7 +296,6 @@ pub const list = list: {
             "@call",
             .{
                 .tag = .call,
-                .needs_mem_loc = .always,
                 .eval_to_error = .maybe,
                 .param_count = 3,
             },
@@ -501,17 +484,9 @@ pub const list = list: {
             },
         },
         .{
-            "@fence",
-            .{
-                .tag = .fence,
-                .param_count = 1,
-            },
-        },
-        .{
             "@field",
             .{
                 .tag = .field,
-                .needs_mem_loc = .always,
                 .eval_to_error = .maybe,
                 .param_count = 2,
                 .allows_lvalue = true,
@@ -521,6 +496,13 @@ pub const list = list: {
             "@fieldParentPtr",
             .{
                 .tag = .field_parent_ptr,
+                .param_count = 2,
+            },
+        },
+        .{
+            "@FieldType",
+            .{
+                .tag = .FieldType,
                 .param_count = 2,
             },
         },
@@ -745,14 +727,6 @@ pub const list = list: {
             },
         },
         .{
-            "@setAlignStack",
-            .{
-                .tag = .set_align_stack,
-                .param_count = 1,
-                .illegal_outside_function = true,
-            },
-        },
-        .{
             "@setEvalBranchQuota",
             .{
                 .tag = .set_eval_branch_quota,
@@ -826,7 +800,6 @@ pub const list = list: {
             "@src",
             .{
                 .tag = .src,
-                .needs_mem_loc = .always,
                 .param_count = 0,
                 .illegal_outside_function = true,
             },
@@ -996,7 +969,6 @@ pub const list = list: {
             "@unionInit",
             .{
                 .tag = .union_init,
-                .needs_mem_loc = .always,
                 .param_count = 3,
             },
         },

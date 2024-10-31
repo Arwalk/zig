@@ -4,7 +4,6 @@ const assert = std.debug.assert;
 const mem = std.mem;
 const math = std.math;
 const meta = std.meta;
-const CallingConvention = std.builtin.CallingConvention;
 const clang = @import("clang.zig");
 const aro = @import("aro");
 const CToken = aro.Tokenizer.Token;
@@ -27,23 +26,23 @@ pub const Context = struct {
     gpa: mem.Allocator,
     arena: mem.Allocator,
     source_manager: *clang.SourceManager,
-    decl_table: std.AutoArrayHashMapUnmanaged(usize, []const u8) = .{},
+    decl_table: std.AutoArrayHashMapUnmanaged(usize, []const u8) = .empty,
     alias_list: AliasList,
     global_scope: *Scope.Root,
     clang_context: *clang.ASTContext,
     mangle_count: u32 = 0,
     /// Table of record decls that have been demoted to opaques.
-    opaque_demotes: std.AutoHashMapUnmanaged(usize, void) = .{},
+    opaque_demotes: std.AutoHashMapUnmanaged(usize, void) = .empty,
     /// Table of unnamed enums and records that are child types of typedefs.
-    unnamed_typedefs: std.AutoHashMapUnmanaged(usize, []const u8) = .{},
+    unnamed_typedefs: std.AutoHashMapUnmanaged(usize, []const u8) = .empty,
     /// Needed to decide if we are parsing a typename
-    typedefs: std.StringArrayHashMapUnmanaged(void) = .{},
+    typedefs: std.StringArrayHashMapUnmanaged(void) = .empty,
 
     /// This one is different than the root scope's name table. This contains
     /// a list of names that we found by visiting all the top level decls without
     /// translating them. The other maps are updated as we translate; this one is updated
     /// up front in a pre-processing step.
-    global_names: std.StringArrayHashMapUnmanaged(void) = .{},
+    global_names: std.StringArrayHashMapUnmanaged(void) = .empty,
 
     /// This is similar to `global_names`, but contains names which we would
     /// *like* to use, but do not strictly *have* to if they are unavailable.
@@ -52,7 +51,7 @@ pub const Context = struct {
     /// may be mangled.
     /// This is distinct from `global_names` so we can detect at a type
     /// declaration whether or not the name is available.
-    weak_global_names: std.StringArrayHashMapUnmanaged(void) = .{},
+    weak_global_names: std.StringArrayHashMapUnmanaged(void) = .empty,
 
     pattern_list: PatternList,
 
@@ -2644,7 +2643,9 @@ fn transInitListExprArray(
     const init_count = expr.getNumInits();
     assert(@as(*const clang.Type, @ptrCast(arr_type)).isConstantArrayType());
     const const_arr_ty = @as(*const clang.ConstantArrayType, @ptrCast(arr_type));
-    const size_ap_int = const_arr_ty.getSize();
+    var size_ap_int: *const clang.APInt = undefined;
+    const_arr_ty.getSize(&size_ap_int);
+    defer size_ap_int.free();
     const all_count = size_ap_int.getLimitedValue(usize);
     const leftover_count = all_count - init_count;
 
@@ -3665,6 +3666,7 @@ fn transUnaryExprOrTypeTraitExpr(
         .AlignOf => try Tag.alignof.create(c.arena, type_node),
         .DataSizeOf,
         .PreferredAlignOf,
+        .PtrAuthTypeDiscriminator,
         .VecStep,
         .OpenMPRequiredSimdAlign,
         => return fail(
@@ -4793,7 +4795,9 @@ fn transType(c: *Context, scope: *Scope, ty: *const clang.Type, source_loc: clan
         .ConstantArray => {
             const const_arr_ty = @as(*const clang.ConstantArrayType, @ptrCast(ty));
 
-            const size_ap_int = const_arr_ty.getSize();
+            var size_ap_int: *const clang.APInt = undefined;
+            const_arr_ty.getSize(&size_ap_int);
+            defer size_ap_int.free();
             const size = size_ap_int.getLimitedValue(usize);
             const elem_type = try transType(c, scope, const_arr_ty.getElementType().getTypePtr(), source_loc);
 
@@ -4996,17 +5000,20 @@ fn transCC(
     c: *Context,
     fn_ty: *const clang.FunctionType,
     source_loc: clang.SourceLocation,
-) !CallingConvention {
+) !ast.Payload.Func.CallingConvention {
     const clang_cc = fn_ty.getCallConv();
-    switch (clang_cc) {
-        .C => return CallingConvention.C,
-        .X86StdCall => return CallingConvention.Stdcall,
-        .X86FastCall => return CallingConvention.Fastcall,
-        .X86VectorCall, .AArch64VectorCall => return CallingConvention.Vectorcall,
-        .X86ThisCall => return CallingConvention.Thiscall,
-        .AAPCS => return CallingConvention.AAPCS,
-        .AAPCS_VFP => return CallingConvention.AAPCSVFP,
-        .X86_64SysV => return CallingConvention.SysV,
+    return switch (clang_cc) {
+        .C => .c,
+        .X86_64SysV => .x86_64_sysv,
+        .Win64 => .x86_64_win,
+        .X86StdCall => .x86_stdcall,
+        .X86FastCall => .x86_fastcall,
+        .X86ThisCall => .x86_thiscall,
+        .X86VectorCall => .x86_vectorcall,
+        .AArch64VectorCall => .aarch64_vfabi,
+        .AAPCS => .arm_aapcs,
+        .AAPCS_VFP => .arm_aapcs_vfp,
+        .M68kRTD => .m68k_rtd,
         else => return fail(
             c,
             error.UnsupportedType,
@@ -5014,7 +5021,7 @@ fn transCC(
             "unsupported calling convention: {s}",
             .{@tagName(clang_cc)},
         ),
-    }
+    };
 }
 
 fn transFnProto(
@@ -5051,7 +5058,7 @@ fn finishTransFnProto(
     source_loc: clang.SourceLocation,
     fn_decl_context: ?FnDeclContext,
     is_var_args: bool,
-    cc: CallingConvention,
+    cc: ast.Payload.Func.CallingConvention,
     is_pub: bool,
 ) !*ast.Payload.Func {
     const is_export = if (fn_decl_context) |ctx| ctx.is_export else false;
@@ -5099,7 +5106,7 @@ fn finishTransFnProto(
 
     const alignment = if (fn_decl) |decl| ClangAlignment.forFunc(c, decl).zigAlignment() else null;
 
-    const explicit_callconv = if ((is_inline or is_export or is_extern) and cc == .C) null else cc;
+    const explicit_callconv = if ((is_inline or is_export or is_extern) and cc == .c) null else cc;
 
     const return_type_node = blk: {
         if (fn_ty.getNoReturnAttr()) {
@@ -5258,7 +5265,7 @@ fn getMacroText(unit: *const clang.ASTUnit, c: *const Context, macro: *const cla
     const end_c = c.source_manager.getCharacterData(end_loc);
     const slice_len = @intFromPtr(end_c) - @intFromPtr(begin_c);
 
-    var comp = aro.Compilation.init(c.gpa);
+    var comp = aro.Compilation.init(c.gpa, std.fs.cwd());
     defer comp.deinit();
     const result = comp.addSourceFromBuffer("", begin_c[0..slice_len]) catch return error.OutOfMemory;
 
